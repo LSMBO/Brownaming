@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+# Wrapper script to run Brownaming with docker-compose
+# Automatically detects and mounts the directory containing the input file
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CONFIG_FILE="$SCRIPT_DIR/config.json"
+
+# Read local_db_path from config.json
+if [[ ! -f "$CONFIG_FILE" ]]; then
+    echo "Error: config.json not found" >&2
+    exit 1
+fi
+
+DB_PATH=$(python3 -c "import json; print(json.load(open('$CONFIG_FILE'))['local_db_path'])" 2>/dev/null)
+if [[ -z "$DB_PATH" ]]; then
+    echo "Error: local_db_path not found in config.json" >&2
+    exit 1
+fi
+
+export BROWNAMING_DB_PATH="$DB_PATH"
+
+# Parse arguments to find the input file (-p argument)
+INPUT_FILE=""
+for ((i=1; i<=$#; i++)); do
+    if [[ "${!i}" == "-p" || "${!i}" == "--proteins" ]]; then
+        ((i++))
+        INPUT_FILE="${!i}"
+        break
+    fi
+done
+
+# If we found an input file, detect its directory and mount it
+if [[ -n "$INPUT_FILE" ]]; then
+    # Get absolute path
+    INPUT_FILE_ABS=$(realpath "$INPUT_FILE" 2>/dev/null || echo "$INPUT_FILE")
+    
+    # Get the directory containing the file
+    INPUT_DIR=$(dirname "$INPUT_FILE_ABS")
+    
+    # Find the top-level parent directory (one level up from the deepest structure)
+    # We'll mount the parent of the parent to be safe
+    TOP_DIR=$(dirname "$INPUT_DIR")
+    
+    echo "[INFO] Detected input file: $INPUT_FILE_ABS" >&2
+    echo "[INFO] Mounting directory: $TOP_DIR as /input" >&2
+    
+    # Calculate relative path from TOP_DIR to INPUT_FILE
+    RELATIVE_PATH="${INPUT_FILE_ABS#$TOP_DIR/}"
+    CONTAINER_PATH="/input/$RELATIVE_PATH"
+    
+    # Export for docker-compose
+    export BROWNAMING_INPUT_DIR="$TOP_DIR"
+    
+    # Convert the -p argument to container path
+    ARGS=()
+    SKIP_NEXT=false
+    for arg in "$@"; do
+        if [[ "$SKIP_NEXT" == true ]]; then
+            ARGS+=("$CONTAINER_PATH")
+            SKIP_NEXT=false
+        elif [[ "$arg" == "-p" || "$arg" == "--proteins" ]]; then
+            ARGS+=("$arg")
+            SKIP_NEXT=true
+        else
+            ARGS+=("$arg")
+        fi
+    done
+    
+    exec docker-compose "${ARGS[@]}"
+else
+    # No input file specified, run as-is
+    exec docker-compose "$@"
+fi

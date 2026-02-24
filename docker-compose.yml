@@ -1,0 +1,22 @@
+version: '3.8'
+
+services:
+  brownaming:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: brownaming:latest
+    container_name: brownaming
+    volumes:
+      - ${BROWNAMING_DB_PATH}:/db
+      - ${BROWNAMING_INPUT_DIR:-/tmp}:/input
+      # Mount source code (allows changes without rebuild)
+      - ./:/app
+      # Runs directory is mounted separately to persist results on host
+      - ./runs:/app/runs
+    environment:
+      - LOCAL_DB_PATH=/db
+    working_dir: /app
+    # Usage: ./brownaming-compose run --rm brownaming python main.py -p /path/to/query.faa -s 83333
+    # The script automatically detects and mounts the directory containing your input file
+    command: python main.py --help
