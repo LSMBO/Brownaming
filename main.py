@@ -1,6 +1,5 @@
 import argparse
 import os, re
-import utils, homology, excel, stats
 from Bio import SeqIO
 from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
@@ -16,8 +15,17 @@ parser.add_argument('--threads', type=int, default=None, help='Number of threads
 parser.add_argument('--last-tax', type=int, default=None, help="(Taxonomy ID) Last taxonomic group for which homology searches will be performed")
 parser.add_argument('--ex-tax', type=int, action='append', help='Taxonomy ID exclude from the research')
 parser.add_argument('--swissprot-only', action='store_true', help='Use only SwissProt database for homology searches')
+parser.add_argument('--local-db', help='Path to local database (optional if defined in LOCAL_DB_PATH env var)')
 parser.add_argument('--resume', help='Resume a previous run using the run ID')
 args = parser.parse_args()
+
+if args.local_db:
+    print(f"[INFO] Using local database path from command line argument: {args.local_db}")
+    os.environ['LOCAL_DB_PATH'] = args.local_db
+
+# Import utils after setting LOCAL_DB_PATH so it can read the environment variable
+import utils, homology, excel, stats
+
 
 if args.resume:
     RUN_ID = args.resume

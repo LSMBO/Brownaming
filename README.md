@@ -83,6 +83,9 @@ python main.py -p /path/to/query.fasta -s 83333 --threads 16
 # SwissProt only
 python main.py -p /path/to/query.fasta -s 83333 --swissprot-only
 
+# Specify database path explicitly (overrides config.json)
+python main.py -p /path/to/query.fasta -s 83333 --local-db /custom/path/to/db
+
 # Resume run
 python main.py --resume 2026-02-24-14-30-83333
 ```
@@ -141,6 +144,10 @@ Use **absolute paths** for your input files:
 ./brownaming-compose run --rm brownaming \
   python main.py -p /absolute/path/to/query.fasta -s 83333 --swissprot-only
 
+# Specify database path explicitly (overrides config.json)
+./brownaming-compose run --rm brownaming \
+  python main.py -p /absolute/path/to/query.fasta -s 83333 --local-db /path/to/db
+
 # Resume run
 ./brownaming-compose run --rm brownaming \
   python main.py --resume 2026-02-24-14-30-83333
@@ -171,10 +178,17 @@ Required:
 * -s / --species <taxid> : NCBI TaxID of target species (root of initial search)
 
 Optional:
+* --local-db <path> : Path to local database directory (overrides LOCAL_DB_PATH env var and config.json)
 * --threads <N> : DIAMOND threads (default: all)
 * --last-tax <taxid> : Stop expanding after this specific TaxID is reached.
 * --ex-tax <taxid> : TaxID to exclude. For multiple exclusions, use this flag multiple times; each instance excludes the specified taxon and its subtree.
 * --swissprot-only: Run DIAMOND searches only on the SwissProt database.
+* --resume <run_id> : Resume a previous run using its run ID (format: YYYY-MM-DD-HH-MM-TAXID)
+
+### Database Path Priority
+Brownaming determines the database location in the following order:
+1. `--local-db` command-line argument
+2. `local_db_path` in `config.json`
 
 ## Outputs
 * **_query_file_name_**_brownamed.fasta : FASTA file with updated headers containing the assigned names.  
