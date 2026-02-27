@@ -9,6 +9,12 @@ import time
 import pandas as pd
 import sklearn
 
+# Global variable for custom working directory base path
+# If None, defaults to script_dir()/runs/
+WORKING_DIR_BASE = None
+
+# Read local_db_path at module import time (global variable)
+# Priority: LOCAL_DB_PATH env var > local_db_path in config.json
 local_db_path = os.environ.get("LOCAL_DB_PATH")
 
 if not local_db_path:
@@ -61,7 +67,7 @@ if os.path.exists(taxid2dbsize_path):
 
 
 def create_run(run_id):
-    working_directory = os.path.join(script_dir(), 'runs', run_id)
+    working_directory = working_dir(run_id)
     if not os.path.exists(working_directory):
         os.makedirs(working_directory)
     return run_id
@@ -99,6 +105,10 @@ def script_dir():
     return os.path.dirname(os.path.abspath(__file__))
 
 def working_dir(run_id):
+    if WORKING_DIR_BASE is not None:
+        if os.path.basename(WORKING_DIR_BASE) == run_id:
+            return WORKING_DIR_BASE
+        return os.path.join(WORKING_DIR_BASE, run_id)
     return os.path.join(script_dir(), 'runs', run_id)
 
 def get_parent_dict():

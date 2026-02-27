@@ -16,6 +16,7 @@ parser.add_argument('--last-tax', type=int, default=None, help="(Taxonomy ID) La
 parser.add_argument('--ex-tax', type=int, action='append', help='Taxonomy ID exclude from the research')
 parser.add_argument('--swissprot-only', action='store_true', help='Use only SwissProt database for homology searches')
 parser.add_argument('--local-db', help='Path to local database (optional if defined in LOCAL_DB_PATH env var)')
+parser.add_argument('--working-dir', help='Path to working directory (optional, default: runs/YYY-MM-DD-HH-MM-TAXID)')
 parser.add_argument('--resume', help='Resume a previous run using the run ID')
 args = parser.parse_args()
 
@@ -26,13 +27,9 @@ if args.local_db:
 # Import utils after setting LOCAL_DB_PATH so it can read the environment variable
 import utils, homology, excel, stats
 
-
 if args.resume:
     RUN_ID = args.resume
-    if not os.path.isdir(utils.working_dir(RUN_ID)):
-        print(f"[ERROR] Run ID not found: {RUN_ID}")
-        exit()
-    # Setup logger for resume
+
     logger = utils.setup_logger(RUN_ID)
     logger.info(f"Resuming Brownaming with run ID: {RUN_ID}")
     state_args, state = utils.load_state(RUN_ID)
@@ -40,6 +37,15 @@ if args.resume:
         query_fasta = state_args.get('proteins')
         target_taxid = state_args.get('species')
         args.ex_tax = state_args.get('ex_tax')
+        args.local_db = state_args.get('local_db')
+        if args.local_db:
+            logger.info(f"Using local database path from saved state: {args.local_db}")
+            os.environ['LOCAL_DB_PATH'] = args.local_db
+        args.working_dir = state_args.get('working_dir')
+        if args.working_dir:
+            if not os.path.isabs(args.working_dir):
+                args.working_dir = os.path.abspath(args.working_dir)
+            utils.WORKING_DIR_BASE = args.working_dir
     if state:
         assigned = state['assigned']
         pending = state['pending']
@@ -58,7 +64,22 @@ if args.resume:
         estimated_minutes = int(estimated_runtime % 60)
         logger.info(f"Resuming from step {step} with {len(pending)} pending sequences")
         logger.info(f"Estimated remaining runtime: {estimated_hours:02d}:{estimated_minutes:02d} (hh:mm)")
+
+    if not os.path.isdir(utils.working_dir(RUN_ID)):
+        print(f"[ERROR] Run ID not found: {RUN_ID}")
+        exit()        
+
 else:
+    if args.local_db:
+        print(f"[INFO] Using local database path from saved state: {args.local_db}")
+        os.environ['LOCAL_DB_PATH'] = args.local_db    
+    
+    if args.working_dir:
+        if not os.path.isabs(args.working_dir):
+            args.working_dir = os.path.abspath(args.working_dir)
+        utils.WORKING_DIR_BASE = args.working_dir
+        print(f"[INFO] Using custom working directory: {args.working_dir}")
+    
     query_fasta = args.proteins
     target_taxid = args.species
     if not os.path.isfile(query_fasta):
@@ -68,12 +89,17 @@ else:
         print(f"[ERROR] Target species taxonomy ID is required.")
         exit()
         
-    # Create run ID with format: yyyy-mm-dd-hh-mm-taxid
-    timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M")
-    RUN_ID = f"{timestamp}-{target_taxid}"
+    if args.working_dir:
+        RUN_ID = os.path.basename(args.working_dir)
+    else:
+        # Create run ID with format: yyyy-mm-dd-hh-mm-taxid
+        timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M")
+        RUN_ID = f"{timestamp}-{target_taxid}"
+        
     utils.create_run(RUN_ID)
+        
     utils.save_state_args(args, RUN_ID)
-    # Setup logger
+
     logger = utils.setup_logger(RUN_ID)
     logger.info(f"Starting the Brownaming process with run ID: {RUN_ID}")
 
@@ -92,7 +118,7 @@ taxid2name = utils.get_taxid_to_scientificname()
 excluded_tax = []
 if args.ex_tax:
     for tax in args.ex_tax:
-        excluded_tax += utils.get_children(tax, children)
+        excluded_tax += utils.get_children(tax)
 
 if not args.resume or not state:
     query_ids = [rec.id for rec in SeqIO.parse(query_fasta, 'fasta')]
@@ -234,4 +260,4 @@ for record in SeqIO.parse(query_fasta, "fasta"):
 with open(output_fasta_file, "w") as f:
     SeqIO.write(output_records, f, "fasta")
 
-os.remove(os.path.join('runs', RUN_ID, 'state_args.json'))
+os.remove(os.path.join(utils.working_dir(RUN_ID), 'state_args.json'))

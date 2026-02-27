@@ -86,11 +86,14 @@ python main.py -p /path/to/query.fasta -s 83333 --swissprot-only
 # Specify database path explicitly (overrides config.json)
 python main.py -p /path/to/query.fasta -s 83333 --local-db /custom/path/to/db
 
+# Specify custom working directory (default: runs/YYYY-MM-DD-HH-MM-TAXID)
+python main.py -p /path/to/query.fasta -s 83333 --working-dir /custom/output/path
+
 # Resume run
 python main.py --resume 2026-02-24-14-30-83333
 ```
 
-Results saved in: `runs/YYYY-MM-DD-HH-MM-TAXID/`
+Results saved in: `runs/YYYY-MM-DD-HH-MM-TAXID/` (or custom directory if --working-dir specified)
 
 #### Improving Runtime Predictions
 
@@ -148,12 +151,16 @@ Use **absolute paths** for your input files:
 ./brownaming-compose run --rm brownaming \
   python main.py -p /absolute/path/to/query.fasta -s 83333 --local-db /path/to/db
 
+# Specify custom working directory (default: runs/YYYY-MM-DD-HH-MM-TAXID)
+./brownaming-compose run --rm brownaming \
+  python main.py -p /absolute/path/to/query.fasta -s 83333 --working-dir /custom/output/path
+
 # Resume run
 ./brownaming-compose run --rm brownaming \
   python main.py --resume 2026-02-24-14-30-83333
 ```
 
-Results saved in: `runs/YYYY-MM-DD-HH-MM-TAXID/`
+Results saved in: `runs/YYYY-MM-DD-HH-MM-TAXID/` (or custom directory if --working-dir specified)
 
 #### Improving Runtime Predictions
 
@@ -179,6 +186,7 @@ Required:
 
 Optional:
 * --local-db <path> : Path to local database directory (overrides LOCAL_DB_PATH env var and config.json)
+* --working-dir <path> : Path to working directory for runs (optional, default: script_dir/runs/YYYY-MM-DD-HH-MM-TAXID)
 * --threads <N> : DIAMOND threads (default: all)
 * --last-tax <taxid> : Stop expanding after this specific TaxID is reached.
 * --ex-tax <taxid> : TaxID to exclude. For multiple exclusions, use this flag multiple times; each instance excludes the specified taxon and its subtree.
