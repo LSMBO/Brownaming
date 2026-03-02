@@ -91,6 +91,9 @@ python main.py -p /path/to/query.fasta -s 83333 --working-dir /custom/output/pat
 
 # Resume run
 python main.py --resume 2026-02-24-14-30-83333
+
+# Resume run started with custom database path and custom working directory
+python main.py --resume 2026-02-24-14-30-83333 --local-db /custom/path/to/db --working-dir /custom/output/path
 ```
 
 Results saved in: `runs/YYYY-MM-DD-HH-MM-TAXID/` (or custom directory if --working-dir specified)
@@ -158,6 +161,12 @@ Use **absolute paths** for your input files:
 # Resume run
 ./brownaming-compose run --rm brownaming \
   python main.py --resume 2026-02-24-14-30-83333
+
+# Resume run started with custom database path and custom working directory
+./brownaming-compose run --rm brownaming \
+  python main.py --resume 2026-02-24-14-30-83333 \
+    --local-db /path/to/db \
+    --working-dir /custom/output/path
 ```
 
 Results saved in: `runs/YYYY-MM-DD-HH-MM-TAXID/` (or custom directory if --working-dir specified)
@@ -192,6 +201,13 @@ Optional:
 * --ex-tax <taxid> : TaxID to exclude. For multiple exclusions, use this flag multiple times; each instance excludes the specified taxon and its subtree.
 * --swissprot-only: Run DIAMOND searches only on the SwissProt database.
 * --resume <run_id> : Resume a previous run using its run ID (format: YYYY-MM-DD-HH-MM-TAXID)
+
+### Resume Notes
+When using `--resume`, if the original run was started with a custom database path and/or a custom working directory, pass the same values again:
+
+```bash
+python main.py --resume <run_id> --local-db <same_db_path> --working-dir <same_working_dir>
+```
 
 ### Database Path Priority
 Brownaming determines the database location in the following order:

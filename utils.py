@@ -91,7 +91,9 @@ def setup_logger(run_id):
     logger.addHandler(console_handler)
     
     # File handler
-    log_file = os.path.join(working_dir(run_id), f'{run_id}.log')
+    run_working_dir = working_dir(run_id)
+    os.makedirs(run_working_dir, exist_ok=True)
+    log_file = os.path.join(run_working_dir, f'{run_id}.log')
     file_handler = logging.FileHandler(log_file, mode='a')
     file_handler.setLevel(logging.INFO)
     file_format = logging.Formatter('[%(levelname)s] %(message)s')
@@ -106,6 +108,10 @@ def script_dir():
 
 def working_dir(run_id):
     if WORKING_DIR_BASE is not None:
+        state_args_path = os.path.join(WORKING_DIR_BASE, 'state_args.json')
+        state_file_path = os.path.join(WORKING_DIR_BASE, 'state.pkl')
+        if os.path.isfile(state_args_path) or os.path.isfile(state_file_path):
+            return WORKING_DIR_BASE
         if os.path.basename(WORKING_DIR_BASE) == run_id:
             return WORKING_DIR_BASE
         return os.path.join(WORKING_DIR_BASE, run_id)
@@ -262,4 +268,4 @@ def load_state(run_id):
     
     except (FileNotFoundError, pickle.UnpicklingError) as e:
         print(f"[ERROR] Could not load state: {e}", flush=True)
-        return None
+        return None, None
