@@ -7,63 +7,14 @@ import pickle
 import requests
 import time
 import pandas as pd
-import sklearn
+import logging
 
-# Global variable for custom working directory base path
-# If None, defaults to script_dir()/runs/
-WORKING_DIR_BASE = None
-
-# Read local_db_path at module import time (global variable)
-# Priority: LOCAL_DB_PATH env var > local_db_path in config.json
-local_db_path = os.environ.get("LOCAL_DB_PATH")
-
-if not local_db_path:
-    config_file = os.path.join(os.path.dirname(__file__), "config.json")
-    if os.path.exists(config_file):
-        with open(config_file, "r") as f:
-            local_db_path = json.load(f).get("local_db_path", None)
-
-if not local_db_path:
-    print("[ERROR] Database path not found. Set LOCAL_DB_PATH env var or local_db_path in config.json")
-    exit()
-    
-
-parent_path = os.path.join(local_db_path, "taxonomy", "parent.json")
-if os.path.exists(parent_path):
-    with open(parent_path, 'r') as f:
-        PARENT = json.load(f)
-else:
-    print(f"[ERROR] '{parent_path}' not found. Please build parent.json with load_nodes.py.")
-    exit()
-    
-rank_path = os.path.join(local_db_path, "taxonomy", "rank.json")
-if os.path.exists(rank_path):
-    with open(rank_path, 'r') as f:
-        RANK = json.load(f)
-else:
-    print(f"[ERROR] '{rank_path}' not found. Please build rank.json with load_nodes.py.")
-    exit()
-    
-children_path = os.path.join(local_db_path, "taxonomy", "children.json")
-if os.path.exists(children_path):
-    with open(children_path, 'r') as f:
-        CHILDREN = json.load(f)
-else:
-    print(f"[ERROR] '{children_path}' not found. Please build children.json with load_nodes.py.")
-    exit()
-
-taxid2name_path = os.path.join(local_db_path, "taxonomy", "taxid2scientific_name.json")
-if os.path.exists(taxid2name_path):
-    with open(taxid2name_path, 'r') as f:
-        TAXID_TO_NAME = json.load(f)
-else:
-    print(f"[ERROR] '{taxid2name_path}' not found. Please build taxid2scientific_name.json with create_local_db.sh.")
-    exit()
-
-taxid2dbsize_path = os.path.join(local_db_path, "taxonomy", "taxid2dbsize.json")
-if os.path.exists(taxid2dbsize_path):
-    with open(taxid2dbsize_path, 'r') as f:
-        TAXID_TO_DBSIZE = json.load(f)
+LOCAL_DB_PATH = None
+PARENT = {}
+RANK = {}
+CHILDREN = {}
+TAXID_TO_NAME = {}
+TAXID_TO_DBSIZE = {}
 
 
 def create_run(run_id):
@@ -74,9 +25,7 @@ def create_run(run_id):
 
 
 def setup_logger(run_id):
-    """Setup logger that writes to both console and log file."""
-    import logging
-    
+    """Setup logger that writes to both console and log file."""    
     logger = logging.getLogger('brownaming')
     logger.setLevel(logging.INFO)
     
@@ -102,40 +51,70 @@ def setup_logger(run_id):
     
     return logger
 
-
 def script_dir():
     return os.path.dirname(os.path.abspath(__file__))
 
 def working_dir(run_id):
-    if WORKING_DIR_BASE is not None:
-        state_args_path = os.path.join(WORKING_DIR_BASE, 'state_args.json')
-        state_file_path = os.path.join(WORKING_DIR_BASE, 'state.pkl')
-        if os.path.isfile(state_args_path) or os.path.isfile(state_file_path):
-            return WORKING_DIR_BASE
-        if os.path.basename(WORKING_DIR_BASE) == run_id:
-            return WORKING_DIR_BASE
-        return os.path.join(WORKING_DIR_BASE, run_id)
-    return os.path.join(script_dir(), 'runs', run_id)
+    return os.path.join(script_dir(), 'runs', str(run_id))
 
+def get_local_db_path():
+    return LOCAL_DB_PATH
+
+def set_local_db_path():
+    config_file = os.path.join(os.path.dirname(__file__), "config.json")
+    if os.path.exists(config_file):
+        with open(config_file, "r") as f:
+            return json.load(f).get("local_db_path", None)
+            
 def get_parent_dict():
     return PARENT
+
+def set_parent_dict():
+    parent_path = os.path.join(LOCAL_DB_PATH, "taxonomy", "parent.json")
+    if os.path.exists(parent_path):
+        with open(parent_path, 'r') as f:
+            return json.load(f)
 
 def get_rank_dict():
     return RANK
 
+def set_rank_dict():
+    rank_path = os.path.join(LOCAL_DB_PATH, "taxonomy", "rank.json")
+    if os.path.exists(rank_path):
+        with open(rank_path, 'r') as f:
+            return json.load(f)
+
 def get_children_dict():
     return CHILDREN
+
+def set_children_dict():
+    children_path = os.path.join(LOCAL_DB_PATH, "taxonomy", "children.json")
+    if os.path.exists(children_path):
+        with open(children_path, 'r') as f:
+            return json.load(f)
 
 def get_taxid_to_scientificname():    
     return TAXID_TO_NAME
 
+def set_taxid_to_scientificname():
+    taxid2name_path = os.path.join(LOCAL_DB_PATH, "taxonomy", "taxid2scientific_name.json")
+    if os.path.exists(taxid2name_path):
+        with open(taxid2name_path, 'r') as f:
+            return json.load(f)
+
 def get_taxid_to_dbsize():
     return TAXID_TO_DBSIZE
 
+def set_taxid_to_dbsize():
+    taxid2dbsize_path = os.path.join(LOCAL_DB_PATH, "taxonomy", "taxid2dbsize.json")
+    if os.path.exists(taxid2dbsize_path):
+        with open(taxid2dbsize_path, 'r') as f:
+            return json.load(f)
+
 def get_db_dmnd(swissprot_only):
     if swissprot_only:
-        return os.path.join(local_db_path, "diamond", "uniprot_sprot.dmnd")
-    return os.path.join(local_db_path, "diamond", "uniprot_all.dmnd")
+        return os.path.join(LOCAL_DB_PATH, "diamond", "uniprot_sprot.dmnd")
+    return os.path.join(LOCAL_DB_PATH, "diamond", "uniprot_all.dmnd")
 
 def gene_name_from_stitle(stitle):
     # UniProt: look for " GN=gene_name "
@@ -227,9 +206,9 @@ def save_state_args(args, run_id):
         json.dump(args_dict, f, indent=4)
 
 def save_state(state_file, assigned, pending, curr_tax, prev_group, step, stats_data, elapsed, query_fasta, target_taxid, query_ids, estimated_runtime_list, dbsizes, args):
-    for step, step_data in stats_data.items():
+    for step_key, step_data in list(stats_data.items()):
         if 'elapsed_time' not in step_data:
-            stats_data.pop(step)
+            stats_data.pop(step_key)
     state = {
         'assigned': assigned,
         'pending': pending,

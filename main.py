@@ -1,12 +1,13 @@
 import argparse
 import os, re
+import shutil
 from Bio import SeqIO
 from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
 import time
 import copy
-import logging
 from datetime import datetime
+import utils, homology, excel, stats
 
 parser = argparse.ArgumentParser(description="Brownaming: Propagating Sequence Names for Similar Organisms")
 parser.add_argument('-p', '--proteins', help='FASTA file of query proteins')
@@ -16,36 +17,47 @@ parser.add_argument('--last-tax', type=int, default=None, help="(Taxonomy ID) La
 parser.add_argument('--ex-tax', type=int, action='append', help='Taxonomy ID exclude from the research')
 parser.add_argument('--swissprot-only', action='store_true', help='Use only SwissProt database for homology searches')
 parser.add_argument('--local-db', help='Path to local database (optional if defined in LOCAL_DB_PATH env var)')
-parser.add_argument('--working-dir', help='Path to working directory (optional, default: runs/YYY-MM-DD-HH-MM-TAXID)')
+parser.add_argument('--working-dir', help='Final output directory (optional, run still executes in runs/YYYY-MM-DD-HH-MM-TAXID)')
 parser.add_argument('--resume', help='Resume a previous run using the run ID')
 args = parser.parse_args()
 
-if args.local_db:
-    print(f"[INFO] Using local database path from command line argument: {args.local_db}")
-    os.environ['LOCAL_DB_PATH'] = args.local_db
 
-# Import utils after setting LOCAL_DB_PATH so it can read the environment variable
-import utils, homology, excel, stats
+def error_exit(message, run_id=None):
+    if run_id:
+        print(f"[ERROR] [run_id={run_id}] {message}")
+    else:
+        print(f"[ERROR] {message}")
+    exit(1)
+
+
+RUN_ID = None
+state = None
+final_output_dir = None
 
 if args.resume:
-    RUN_ID = args.resume
+    RUN_ID = str(args.resume)
+    run_working_dir = utils.working_dir(RUN_ID)
+
+    if not os.path.isdir(run_working_dir):
+        error_exit("Run directory not found in Brownaming/runs.", RUN_ID)
+
+    state_args, state = utils.load_state(RUN_ID)
+    print(state['step'])
+    if not state_args:
+        error_exit("Could not load resume state from state_args.json.", RUN_ID)
+
+    query_fasta = state_args.get('proteins')
+    target_taxid = state_args.get('species')
+    args.ex_tax = state_args.get('ex_tax')
+    args.last_tax = state_args.get('last_tax')
+    args.swissprot_only = state_args.get('swissprot_only', False)
+    args.local_db = state_args.get('local_db')
+    args.threads = state_args.get('threads')
+    final_output_dir = state_args.get('working_dir')
 
     logger = utils.setup_logger(RUN_ID)
     logger.info(f"Resuming Brownaming with run ID: {RUN_ID}")
-    state_args, state = utils.load_state(RUN_ID)
-    if state_args:
-        query_fasta = state_args.get('proteins')
-        target_taxid = state_args.get('species')
-        args.ex_tax = state_args.get('ex_tax')
-        args.local_db = state_args.get('local_db')
-        if args.local_db:
-            logger.info(f"Using local database path from saved state: {args.local_db}")
-            os.environ['LOCAL_DB_PATH'] = args.local_db
-        args.working_dir = state_args.get('working_dir')
-        if args.working_dir:
-            if not os.path.isabs(args.working_dir):
-                args.working_dir = os.path.abspath(args.working_dir)
-            utils.WORKING_DIR_BASE = args.working_dir
+
     if state:
         assigned = state['assigned']
         pending = state['pending']
@@ -58,46 +70,36 @@ if args.resume:
         query_ids = state['query_ids']
         estimated_runtime_list = state['estimated_runtime_list']
         dbsizes = state['dbsizes']
-        args = state['args']
+        saved_args = state.get('args')
+        if saved_args:
+            args.ex_tax = getattr(saved_args, 'ex_tax', args.ex_tax)
+            args.last_tax = getattr(saved_args, 'last_tax', args.last_tax)
+            args.swissprot_only = getattr(saved_args, 'swissprot_only', args.swissprot_only)
+            args.threads = getattr(saved_args, 'threads', args.threads)
         estimated_runtime = sum(estimated_runtime_list)
         estimated_hours = int(estimated_runtime // 60)
         estimated_minutes = int(estimated_runtime % 60)
         logger.info(f"Resuming from step {step} with {len(pending)} pending sequences")
         logger.info(f"Estimated remaining runtime: {estimated_hours:02d}:{estimated_minutes:02d} (hh:mm)")
 
-    if not os.path.isdir(utils.working_dir(RUN_ID)):
-        print(f"[ERROR] Run ID not found: {RUN_ID}")
-        exit()        
-
 else:
-    if args.local_db:
-        print(f"[INFO] Using local database path from saved state: {args.local_db}")
-        os.environ['LOCAL_DB_PATH'] = args.local_db    
-    
-    if args.working_dir:
-        if not os.path.isabs(args.working_dir):
-            args.working_dir = os.path.abspath(args.working_dir)
-        utils.WORKING_DIR_BASE = args.working_dir
-        print(f"[INFO] Using custom working directory: {args.working_dir}")
-    
     query_fasta = args.proteins
     target_taxid = args.species
+
     if not os.path.isfile(query_fasta):
-        print(f"[ERROR] File not found: {query_fasta}")
-        exit()
+        error_exit(f"File not found: {query_fasta}")
     if target_taxid is None:
-        print(f"[ERROR] Target species taxonomy ID is required.")
-        exit()
-        
+        error_exit("Target species taxonomy ID is required.")
+
+    timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M")
+    RUN_ID = f"{timestamp}-{target_taxid}"
+
     if args.working_dir:
-        RUN_ID = os.path.basename(args.working_dir)
-    else:
-        # Create run ID with format: yyyy-mm-dd-hh-mm-taxid
-        timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M")
-        RUN_ID = f"{timestamp}-{target_taxid}"
-        
+        final_output_dir = os.path.abspath(args.working_dir)
+        args.working_dir = final_output_dir
+        print(f"[INFO] Final output directory requested for run_id {RUN_ID}: {final_output_dir}")
+
     utils.create_run(RUN_ID)
-        
     utils.save_state_args(args, RUN_ID)
 
     logger = utils.setup_logger(RUN_ID)
@@ -108,12 +110,32 @@ output_fasta_file = working_directory + '/' + os.path.basename(query_fasta).repl
 output_stats_file = working_directory + '/' + os.path.basename(query_fasta).replace('.fasta', '_brownaming_stats.png').replace('.faa', '_brownaming_stats.png')
 output_excel_file = working_directory + '/' + os.path.basename(query_fasta).replace('.fasta', '_diamond_results.xlsx').replace('.faa', '_diamond_results.xlsx')
 state_file = os.path.join(working_directory, f"state.pkl")
-save_interval = 15 * 60
+# save_interval = 15 * 60
+save_interval = 5
 next_save = save_interval
+
+if args.local_db:
+    utils.LOCAL_DB_PATH = args.local_db
+    print(f"[INFO] Using local database path from command line argument: {args.local_db}")
+else:
+    utils.LOCAL_DB_PATH = utils.set_local_db_path()
+    args.local_db = utils.LOCAL_DB_PATH
+if not args.local_db:
+    error_exit("Local database path must be provided either through --local-db argument or set in config.json.", RUN_ID)
+                
+utils.PARENT = utils.set_parent_dict()
 parent = utils.get_parent_dict()
+
+utils.RANK = utils.set_rank_dict()
 rank = utils.get_rank_dict()
+
+utils.CHILDREN = utils.set_children_dict()
 children = utils.get_children_dict()
+
+utils.TAXID_TO_NAME = utils.set_taxid_to_scientificname()
 taxid2name = utils.get_taxid_to_scientificname()
+
+utils.TAXID_TO_DBSIZE = utils.set_taxid_to_dbsize()
 
 excluded_tax = []
 if args.ex_tax:
@@ -134,19 +156,19 @@ if not args.resume or not state:
     step = 0
     stats_data = {}
     timer_start = time.time()
-    
+
 while curr_tax is not None and pending:
     step += 1
     tmp_fasta = os.path.join(working_directory, f".pending_{os.getpid()}_{step}.fasta")
     curr_tax_name = taxid2name.get(str(curr_tax), "unknown")
-    curr_tax_rank = rank.get(str(curr_tax),'unknown')
+    curr_tax_rank = rank.get(str(curr_tax), 'unknown')
     
     if len(pending) == len(query_ids):
         tmp_fasta = query_fasta
         n_written = len(pending)
     else:
         n_written = utils.write_pending_fasta(query_fasta, pending, tmp_fasta)
-        
+
     if n_written > 0:
         logger.info(
             f"Step {step}: Searching among {dbsizes[step-1]} sequences of {curr_tax_name} "
@@ -182,7 +204,7 @@ while curr_tax is not None and pending:
             logger.info(f"Step {step}: Found a satisfying hit for {len(assigned)} proteins")
             stats_data[f"Step {step}"]['prots_with_hit'] = len(assigned)
             pending -= {key for key, value in best.items() if len(value) < 3}
-        
+
         if tmp_fasta != query_fasta:
             try:
                 os.remove(tmp_fasta)
@@ -190,42 +212,54 @@ while curr_tax is not None and pending:
                 pass
 
     prev_group = curr_tax
-    if curr_tax == args.last_tax or curr_tax == 131567: # 131567: cellular organisms
+    if curr_tax == args.last_tax or curr_tax == 131567:
         curr_tax = None
     else:
         curr_tax = parent.get(str(curr_tax))
-        
+
     elapsed = time.time() - timer_start
     logger.info(f"Elapsed time: {elapsed/60:.2f} minutes")
     stats_data[f"Step {step}"]['elapsed_time'] = f"{elapsed/60:.2f}"
-
+    print('elapsed :', elapsed, '>= next_save :', next_save)
     if elapsed >= next_save:
-        utils.save_state(state_file, assigned, pending, curr_tax, prev_group, step, stats_data, elapsed, 
-                  query_fasta, target_taxid, query_ids, 
-                  estimated_runtime_list, dbsizes, args)
-            
+        utils.save_state(
+            state_file,
+            assigned,
+            pending,
+            curr_tax,
+            prev_group,
+            step,
+            stats_data,
+            elapsed,
+            query_fasta,
+            target_taxid,
+            query_ids,
+            estimated_runtime_list,
+            dbsizes,
+            args
+        )
         next_save = ((elapsed // save_interval) + 1) * save_interval
-
+        print('next save :', next_save)
 stats.generate_combined_figure(stats_data, output_file=output_stats_file)
 
 output_data = {
-        "Query accession": [],
-        "Subject accession": [],
-        "Subject description": [],
-        "Subject species (taxid)": [],
-        "Subject species (name)": [],
-        "Gene Name": [],
-        "Bitscore": [],
-        "Evalue": [],
-        "Identity (%)": [],
-        "Similarity (%)": [],
-        "Query coverage (%)": [],
-        "Subject coverage (%)": [],
-        "Common ancestor (rank)": [],
-        "Common ancestor (taxID)": [],
-        "Common ancestor (name)": [],
-        "Hit found": []
-    }
+    "Query accession": [],
+    "Subject accession": [],
+    "Subject description": [],
+    "Subject species (taxid)": [],
+    "Subject species (name)": [],
+    "Gene Name": [],
+    "Bitscore": [],
+    "Evalue": [],
+    "Identity (%)": [],
+    "Similarity (%)": [],
+    "Query coverage (%)": [],
+    "Subject coverage (%)": [],
+    "Common ancestor (rank)": [],
+    "Common ancestor (taxID)": [],
+    "Common ancestor (name)": [],
+    "Hit found": []
+}
 output_top3 = copy.deepcopy(output_data)
 
 for qid in query_ids:
@@ -236,7 +270,7 @@ for qid in query_ids:
     else:
         output_data = excel.add_no_hit(output_data, qid)
         output_top3 = excel.add_no_hit(output_top3, qid)
-        
+
 excel.write_excel(output_data, output_excel_file)
 excel.add_sheet(output_top3, output_excel_file, "Top3 hits")
 
@@ -244,8 +278,8 @@ output_records = []
 for record in SeqIO.parse(query_fasta, "fasta"):
     new_description = "Uncharacterized protein"
     if record.id in assigned:
-        re_description_search = re.findall(r" .* OS=", assigned[record.id][0].get("stitle",""))
-        if (len(re_description_search)!=0):
+        re_description_search = re.findall(r" .* OS=", assigned[record.id][0].get("stitle", ""))
+        if len(re_description_search) != 0:
             record_description = re_description_search[0][1:-4]
             new_description = f"{record_description} FROM {taxid2name.get(str(assigned[record.id][0].get('staxid')), '')}"
 
@@ -254,10 +288,19 @@ for record in SeqIO.parse(query_fasta, "fasta"):
         id=record.id,
         description=new_description
     )
-    
     output_records.append(rec)
 
 with open(output_fasta_file, "w") as f:
     SeqIO.write(output_records, f, "fasta")
 
-os.remove(os.path.join(utils.working_dir(RUN_ID), 'state_args.json'))
+if final_output_dir:
+    internal_run_dir = utils.working_dir(RUN_ID)
+    destination_dir = os.path.abspath(final_output_dir)
+    if os.path.abspath(internal_run_dir) != destination_dir:
+        if os.path.exists(destination_dir):
+            error_exit(f"Cannot move completed run to '{destination_dir}' because destination already exists.", RUN_ID)
+        destination_parent = os.path.dirname(destination_dir)
+        if destination_parent:
+            os.makedirs(destination_parent, exist_ok=True)
+        shutil.move(internal_run_dir, destination_dir)
+        logger.info(f"Run {RUN_ID} moved to custom output directory: {destination_dir}")

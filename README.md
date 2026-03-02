@@ -86,17 +86,16 @@ python main.py -p /path/to/query.fasta -s 83333 --swissprot-only
 # Specify database path explicitly (overrides config.json)
 python main.py -p /path/to/query.fasta -s 83333 --local-db /custom/path/to/db
 
-# Specify custom working directory (default: runs/YYYY-MM-DD-HH-MM-TAXID)
+# Specify custom final output directory
 python main.py -p /path/to/query.fasta -s 83333 --working-dir /custom/output/path
 
 # Resume run
 python main.py --resume 2026-02-24-14-30-83333
-
-# Resume run started with custom database path and custom working directory
-python main.py --resume 2026-02-24-14-30-83333 --local-db /custom/path/to/db --working-dir /custom/output/path
 ```
 
-Results saved in: `runs/YYYY-MM-DD-HH-MM-TAXID/` (or custom directory if --working-dir specified)
+Brownaming always executes in: `runs/YYYY-MM-DD-HH-MM-TAXID/`
+
+If `--working-dir` is provided, the run directory is moved to that destination only after successful completion.
 
 #### Improving Runtime Predictions
 
@@ -154,22 +153,18 @@ Use **absolute paths** for your input files:
 ./brownaming-compose run --rm brownaming \
   python main.py -p /absolute/path/to/query.fasta -s 83333 --local-db /path/to/db
 
-# Specify custom working directory (default: runs/YYYY-MM-DD-HH-MM-TAXID)
+# Specify custom final output directory
 ./brownaming-compose run --rm brownaming \
   python main.py -p /absolute/path/to/query.fasta -s 83333 --working-dir /custom/output/path
 
 # Resume run
 ./brownaming-compose run --rm brownaming \
   python main.py --resume 2026-02-24-14-30-83333
-
-# Resume run started with custom database path and custom working directory
-./brownaming-compose run --rm brownaming \
-  python main.py --resume 2026-02-24-14-30-83333 \
-    --local-db /path/to/db \
-    --working-dir /custom/output/path
 ```
 
-Results saved in: `runs/YYYY-MM-DD-HH-MM-TAXID/` (or custom directory if --working-dir specified)
+Brownaming always executes in: `runs/YYYY-MM-DD-HH-MM-TAXID/`
+
+If `--working-dir` is provided, the run directory is moved to that destination only after successful completion.
 
 #### Improving Runtime Predictions
 
@@ -195,7 +190,7 @@ Required:
 
 Optional:
 * --local-db <path> : Path to local database directory (overrides LOCAL_DB_PATH env var and config.json)
-* --working-dir <path> : Path to working directory for runs (optional, default: script_dir/runs/YYYY-MM-DD-HH-MM-TAXID)
+* --working-dir <path> : Final output directory (optional). Computation still runs in `script_dir/runs/<run_id>` and is moved at the end if successful.
 * --threads <N> : DIAMOND threads (default: all)
 * --last-tax <taxid> : Stop expanding after this specific TaxID is reached.
 * --ex-tax <taxid> : TaxID to exclude. For multiple exclusions, use this flag multiple times; each instance excludes the specified taxon and its subtree.
@@ -203,10 +198,12 @@ Optional:
 * --resume <run_id> : Resume a previous run using its run ID (format: YYYY-MM-DD-HH-MM-TAXID)
 
 ### Resume Notes
-When using `--resume`, if the original run was started with a custom database path and/or a custom working directory, pass the same values again:
+When using `--resume`, only the `run_id` is required. Brownaming reloads saved parameters from `runs/<run_id>/state_args.json`
+
+Example:
 
 ```bash
-python main.py --resume <run_id> --local-db <same_db_path> --working-dir <same_working_dir>
+python main.py --resume <run_id>
 ```
 
 ### Database Path Priority
