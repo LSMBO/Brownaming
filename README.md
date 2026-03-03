@@ -195,6 +195,7 @@ Optional:
 * --last-tax <taxid> : Stop expanding after this specific TaxID is reached.
 * --ex-tax <taxid> : TaxID to exclude. For multiple exclusions, use this flag multiple times; each instance excludes the specified taxon and its subtree.
 * --swissprot-only: Run DIAMOND searches only on the SwissProt database.
+* --run-id <custom_id> : Custom run ID (optional, default: YYYY-MM-DD-HH-MM-TAXID). Useful for integration with external systems.
 * --resume <run_id> : Resume a previous run using its run ID (format: YYYY-MM-DD-HH-MM-TAXID)
 
 ### Resume Notes

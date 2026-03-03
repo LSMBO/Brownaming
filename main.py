@@ -18,6 +18,7 @@ parser.add_argument('--ex-tax', type=int, action='append', help='Taxonomy ID exc
 parser.add_argument('--swissprot-only', action='store_true', help='Use only SwissProt database for homology searches')
 parser.add_argument('--local-db', help='Path to local database (optional if defined in LOCAL_DB_PATH env var)')
 parser.add_argument('--working-dir', help='Final output directory (optional, run still executes in runs/YYYY-MM-DD-HH-MM-TAXID)')
+parser.add_argument('--run-id', help='Custom run ID (optional, default: timestamp-taxid)')
 parser.add_argument('--resume', help='Resume a previous run using the run ID')
 args = parser.parse_args()
 
@@ -31,6 +32,9 @@ def error_exit(message, run_id=None):
 
 
 RUN_ID = None
+if args.run_id:
+    RUN_ID = args.run_id
+    
 state = None
 final_output_dir = None
 
@@ -42,7 +46,6 @@ if args.resume:
         error_exit("Run directory not found in Brownaming/runs.", RUN_ID)
 
     state_args, state = utils.load_state(RUN_ID)
-    print(state['step'])
     if not state_args:
         error_exit("Could not load resume state from state_args.json.", RUN_ID)
 
@@ -91,8 +94,9 @@ else:
     if target_taxid is None:
         error_exit("Target species taxonomy ID is required.")
 
-    timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M")
-    RUN_ID = f"{timestamp}-{target_taxid}"
+    if not RUN_ID:
+        timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M")
+        RUN_ID = f"{timestamp}-{target_taxid}"
 
     if args.working_dir:
         final_output_dir = os.path.abspath(args.working_dir)
@@ -220,7 +224,7 @@ while curr_tax is not None and pending:
     elapsed = time.time() - timer_start
     logger.info(f"Elapsed time: {elapsed/60:.2f} minutes")
     stats_data[f"Step {step}"]['elapsed_time'] = f"{elapsed/60:.2f}"
-    print('elapsed :', elapsed, '>= next_save :', next_save)
+
     if elapsed >= next_save:
         utils.save_state(
             state_file,
@@ -239,7 +243,7 @@ while curr_tax is not None and pending:
             args
         )
         next_save = ((elapsed // save_interval) + 1) * save_interval
-        print('next save :', next_save)
+
 stats.generate_combined_figure(stats_data, output_file=output_stats_file)
 
 output_data = {
