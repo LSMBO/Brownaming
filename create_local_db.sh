@@ -37,32 +37,36 @@ if [[ "$REFRESH_MODE" == true && -d "$LOCAL_DB_PATH" ]]; then
     rm -rf "$LOCAL_DB_PATH"
 fi
 
-mkdir -p "${LOCAL_DB_PATH}/uniprot"/{fasta,taxonomy,mapping,diamond}
+mkdir -p "${LOCAL_DB_PATH}"/{fasta,taxonomy,mapping,diamond}
 
 echo "[INFO] Download Swiss-Prot"
-uniprot_sprot_file="${LOCAL_DB_PATH}/uniprot/fasta/uniprot_sprot.fasta"
+uniprot_sprot_file="${LOCAL_DB_PATH}/fasta/uniprot_sprot.fasta"
 curl -L --fail --retry 3 https://ftp.uniprot.org/pub/databases/uniprot/current_release/knowledgebase/complete/uniprot_sprot.fasta.gz \
   | gunzip -c > $uniprot_sprot_file
 
-echo "[INFO] Download TrEMBL (~5h)"
-uniprot_all_file="${LOCAL_DB_PATH}/uniprot/fasta/uniprot_all.fasta"
+echo "[INFO] Download TrEMBL (~1h)"
+uniprot_all_file="${LOCAL_DB_PATH}/fasta/uniprot_all.fasta"
 curl -L --fail --retry 3 https://ftp.uniprot.org/pub/databases/uniprot/current_release/knowledgebase/complete/uniprot_trembl.fasta.gz \
   | gunzip -c > $uniprot_all_file
 
 echo "[INFO] Concatenate"
-cat "${LOCAL_DB_PATH}/uniprot/fasta/uniprot_sprot.fasta" >> "${LOCAL_DB_PATH}/uniprot/fasta/uniprot_all.fasta"
+cat "${LOCAL_DB_PATH}/fasta/uniprot_sprot.fasta" >> "${LOCAL_DB_PATH}/fasta/uniprot_all.fasta"
 
 echo "[INFO] Build taxonmap.tsv"
-taxonmap_file="${LOCAL_DB_PATH}/uniprot/mapping/taxonmap.tsv"
-printf "accession\taccession.version\ttaxid\tgi\n" > $taxonmap_file
-awk -v OFS='\t' '
-  /^>/{
-    acc=""; tax="";
-    split($1,a,"|"); if (length(a)>=2) acc=a[2];
-    if (match($0,/OX=([0-9]+)/,m)) tax=m[1];
-    if (acc!="" && tax!="") printf "%s\t%s\t%s\t0\n", acc, acc, tax;
-  }
-' "${LOCAL_DB_PATH}/uniprot/fasta/uniprot_all.fasta" >> $taxonmap_file
+taxonmap_file="${LOCAL_DB_PATH}/mapping/taxonmap.tsv"
+if [ -s "$taxonmap_file" ]; then
+    echo "[INFO] File exists and is non‑empty, skipping."
+else
+  printf "accession\taccession.version\ttaxid\tgi\n" > $taxonmap_file
+  awk -v OFS='\t' '
+    /^>/{
+      acc=""; tax="";
+      split($1,a,"|"); if (length(a)>=2) acc=a[2];
+      if (match($0,/OX=([0-9]+)/,m)) tax=m[1];
+      if (acc!="" && tax!="") printf "%s\t%s\t%s\t0\n", acc, acc, tax;
+    }
+  ' "${LOCAL_DB_PATH}/fasta/uniprot_all.fasta" >> $taxonmap_file
+fi
 
 lines=$(($(wc -l < $taxonmap_file) - 1))
 if (( lines == 0 )); then
@@ -71,39 +75,59 @@ if (( lines == 0 )); then
 fi
 
 echo "[INFO] Download taxonomy dump"
-nodes="${LOCAL_DB_PATH}/uniprot/taxonomy/nodes.dmp"
-names="${LOCAL_DB_PATH}/uniprot/taxonomy/names.dmp"
-curl -L --fail --retry 3 -o "${LOCAL_DB_PATH}/uniprot/taxonomy/taxdump.tar.gz" \
+nodes="${LOCAL_DB_PATH}/taxonomy/nodes.dmp"
+names="${LOCAL_DB_PATH}/taxonomy/names.dmp"
+curl -L --fail --retry 3 -o "${LOCAL_DB_PATH}/taxonomy/taxdump.tar.gz" \
   https://ftp.ncbi.nlm.nih.gov/pub/taxonomy/new_taxdump/new_taxdump.tar.gz
-tar -C "${LOCAL_DB_PATH}/uniprot/taxonomy" -xzf "${LOCAL_DB_PATH}/uniprot/taxonomy/taxdump.tar.gz" $names $nodes
+tar -C "${LOCAL_DB_PATH}/taxonomy" -xzf "${LOCAL_DB_PATH}/taxonomy/taxdump.tar.gz" names.dmp nodes.dmp
 
 if [[ ! -s "$nodes" || ! -s "$names" ]]; then
   echo "Taxonomy files missing" >&2
   exit 1
 fi
 
+echo "[INFO] Fixing taxonomy ranks for Diamond compatibility"
+# Diamond only recognizes these ranks: superkingdom, kingdom, phylum, class, order, family, genus, species, subspecies, varietas, forma, no rank
+# Replace 'domain' with 'superkingdom' and any invalid rank with 'no rank'
+
+awk 'BEGIN {
+  valid["superkingdom"]=1; valid["kingdom"]=1; valid["phylum"]=1; valid["class"]=1
+  valid["order"]=1; valid["family"]=1; valid["genus"]=1; valid["species"]=1
+  valid["subspecies"]=1; valid["varietas"]=1; valid["forma"]=1; valid["no rank"]=1
+  FS="\t\\|\t"; OFS="\t|\t"
+}
+{
+  # Field 3 is the rank
+  if ($3 == "domain") {
+    $3 = "superkingdom"
+  } else if (!($3 in valid)) {
+    $3 = "no rank"
+  }
+  print
+}' "$nodes" > "${nodes}.tmp" && mv "${nodes}.tmp" "$nodes"
+
 echo "[INFO] Make diamond db (SwissProt only)"
-uniprot_sprot_building="${LOCAL_DB_PATH}/uniprot/fasta/uniprot_sprot.building"
+uniprot_sprot_building="${LOCAL_DB_PATH}/fasta/uniprot_sprot.building"
 diamond makedb -p "$(nproc)" \
   -d $uniprot_sprot_building \
-  --in $uniprot_sprot \
+  --in $uniprot_sprot_file \
   --taxonmap $taxonmap_file \
   --taxonnodes $nodes \
   --taxonnames $names
 diamond dbinfo -d $uniprot_sprot_building > /dev/null \
-  && mv -f "$uniprot_sprot_building.dmnd" "$LOCAL_DB_PATH/uniprot/diamond/uniprot_sprot.dmnd"
+  && mv -f "$uniprot_sprot_building.dmnd" "$LOCAL_DB_PATH/diamond/uniprot_sprot.dmnd"
 
 
 echo "[INFO] Make diamond db (SwissProt and TrEMBL) (~3h)"
-uniprot_all_building="${LOCAL_DB_PATH}/uniprot/fasta/uniprot_all.building"
+uniprot_all_building="${LOCAL_DB_PATH}/fasta/uniprot_all.building"
 diamond makedb -p "$(nproc)" \
   -d $uniprot_all_building \
-  --in $uniprot_all \
+  --in $uniprot_all_file \
   --taxonmap $taxonmap_file \
   --taxonnodes $nodes \
   --taxonnames $names
 diamond dbinfo -d $uniprot_all_building > /dev/null \
-  && mv -f "$uniprot_all_building.dmnd" "$LOCAL_DB_PATH/uniprot/diamond/uniprot_all.dmnd"
+  && mv -f "$uniprot_all_building.dmnd" "$LOCAL_DB_PATH/diamond/uniprot_all.dmnd"
 
 echo "[INFO] Generate taxonomy JSON helpers"
 python "${SCRIPT_DIR}/create_taxonomy_json.py"
